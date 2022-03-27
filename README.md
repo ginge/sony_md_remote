@@ -17,7 +17,9 @@ Here are some other ideas:
  * get a bluetooth uart and make a mobile phone display worthy of yesteryear! Who needs a smart watch!
  
 ## Display Protocol
- 
+
+![Protocol](sony md remote.drawio.png)
+
 ### Wire Protocol
 The protcol is surprisingly sort of bi directional, in that the client device (the remote control)  can plant a byte of data into the host device for processing. This allows the remote control to request different display modes, text and a couple of other noted features.
  
