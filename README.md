@@ -8,6 +8,7 @@ A library that lets you control the remote control display of the Sony range of 
 Additionally, the library supports emulation of a remote control
 Specifically tested are the Minidsc MZR-90/91/55 devices.
 
+![Protocol Example](sony_md_protocol_example.png)
 
 ### Use Cases?
 Who knows, my use case is kinda niche. 1) I was curious about the protocol, I might not have a use for this. 2) I May want to integrate this into a cyberdeck device in the future.
