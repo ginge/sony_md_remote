@@ -38,7 +38,7 @@ print(f"Using Port: {ports[0]}")
 ser = serial.Serial(ports[0])
 ser.flushInput()
 
-timeout = 4000
+timeout = 5000
 reset_low = 800
 pulse_high = -100
 
@@ -102,6 +102,12 @@ class SonyMdRemote:
     
     def process_packet(self, data):
         # ignore printing NOPs
+        
+        str = ""
+        for d in data:
+            str += hex(d) + ", "
+        print(f"[{datetime.datetime.now().strftime('%H:%M:%S.%f')}] Packet: [ {str} ]")
+
         if len(data) <= 2:
             return
         
@@ -305,17 +311,23 @@ def process_packet(packet_array):
     data = []
     bit_counter = 0
     state = 0
+    skp = 0
     
     #print(packet_array)
     for p in packet_array:
         # skip the sync and start bit
         if i < 4:
-            print(f"R: {p}")
             i = i + 1
             state = 1 # packet detect
             continue
 
         if state == 1: # packet detect
+            # if we detect writes, skip the start pulse
+            if len(data) > 1 and data[0] == 0x92 and bit_counter == 0 and skp < 2:
+                i = i + 1
+                skp = skp + 1
+                continue
+            
             # gather the bits
             if not bit_counter % 2:
                 #print(p)
@@ -332,6 +344,7 @@ def process_packet(packet_array):
                 data.append(outp)
                 bit_counter = 0
                 state = 1 # detect stop
+                skp = 0
                 continue       
         
 
@@ -359,7 +372,7 @@ def process_bytes(ser_bytes):
 while True:
     try:
         ser_bytes = ser.readline()
-        print(ser_bytes)
+        #print(ser_bytes)
         
         buf = str(ser_bytes.decode("utf-8"))
         buf = buf.replace("\n", "")
@@ -392,13 +405,14 @@ while True:
                 num = int(num_buf)
                 #print(num_buf)
                 num_buf = ""
+                packet_bits.append(num)
                 if num > timeout:
                     process_packet(packet_bits)
                     packet_bits.clear()
                     #print("Start Packet")
                     md.display()
                     continue
-                packet_bits.append(num)
+
                 num_buf = ""
                 continue
                 

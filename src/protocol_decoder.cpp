@@ -7,6 +7,7 @@
  *  handles r/w to the device etc
  * 
  */
+#include "sony_md_remote.h"
 #if MD_ENABLE_RECV
 
 static uint8_t _prev_level;
@@ -23,11 +24,17 @@ static uint8_t _md_recv_send_byte = 0;
 static uint8_t _md_recv_send_buf[10];
 static uint8_t _md_recv_send_len = 0;
 
-inline void md_recv_set_mode(uint8_t mode) {
+static void _md_process_start();
+static void _decode_md_protocol();
+void _poll_pin_change(int level);
+static void _gather_packets();
+static void _md_recv_send_packet();
+
+void md_recv_set_mode(uint8_t mode) {
   _md_recv_send_byte |= 1 << mode;
 }
 
-inline void md_recv_clear_mode(uint8_t mode) {
+void md_recv_clear_mode(uint8_t mode) {
   _md_recv_send_byte &= ~(1 << mode);
 }
 
@@ -69,11 +76,10 @@ static void _decode_md_protocol() {
   }
   _state = _stateWaitingForStart;
   _gather_packets();
-  //return;
 }
 
 // sit and wait for a pin to toggle
-static void _poll_pin_change(int level) {
+void _poll_pin_change(int level) {
   while(digitalReadFast(MD_DATA_PIN) == level);;
 }
 
@@ -150,7 +156,7 @@ static void _gather_packets() {
   }
 }
 
-void _md_recv_send_packet() {  
+static void _md_recv_send_packet() {  
   // wait for pulse 0 before each send of a byte
   md_send_data(MD_DATA_PIN, _md_recv_send_buf, _md_recv_send_len, 1);
   _md_recv_send_len = 0;
@@ -192,7 +198,6 @@ void md_recv_loop()
     }
     
     if (_byte_buf[1] & (1 << MD_HEADER_HOST_BUS_AVAIL)) {
-      MD_SERIAL_PORT.println("TX Available");
       if (_md_recv_send_len) {
         _md_recv_send_packet();
       }
@@ -231,5 +236,6 @@ void md_recv_loop()
   }
 }
 
-
+void __attribute__((weak)) md_packet_just_received_cb(uint8_t *data) {}
+void __attribute__((weak)) md_text_received_cb(char *text, uint8_t len) {}
 #endif

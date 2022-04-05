@@ -18,6 +18,7 @@ volatile unsigned long startTime = 0;
 
 void setup() {
   Serial.begin(115200);
+  pinMode(TRACE_DATA_PIN, INPUT);
   Serial.println("MD Raw"); 
 }
 

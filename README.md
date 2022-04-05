@@ -3,10 +3,28 @@
 Barry Carter 2022 <barry.carter@gmail.com>
 
 ## What is it?
-A library to emulate being a Sony remote control display AND controlling an existing remote control display. 
-A library that lets you control the remote control display of the Sony range of devices.
-Additionally, the library supports emulation of a remote control
-Specifically tested are the Minidsc MZR-90/91/55 devices.
+
+An arduino libray and supporting example skeches to allow interface to and from Sony LCD Remote control interfaces.
+
+**Supported features are:**
+ * Emulate an LCD remote control plugged into a compatible device
+ * Emulate a host and control an LCD remote control
+ * Emulate CD->MD "joint text" connection using RK-TXT1 link cable emulation to allow track titling and breaks (supported MD devices only, i.e. MZ-R90/1)
+ 
+**Base features:**
+ * A recv client. listen to a MD/CD player host
+ * A send client. Control a LCD remote control
+ * A library to recieve and parse commands into a "friendly" high level interface
+ * A Joint text host sender lib
+
+**Tested On Devices:**
+ * MZ-R90/91
+ * MZ-R55
+ * MZ-R70
+ 
+**With Remotes:**
+ * RM-MZR55
+ * RM-MZ2S
 
 ![Protocol Example](sony_md_protocol_example.png)
 
@@ -46,6 +64,7 @@ When you realise the protocol is actually bidirectional, there is simultaneous e
 Well friends, here is the basis for the Sony Remote Quantun realm.
  
 During the first byte of the header, after each clocked LOW pulse, the host goes into input mode.
+
 This allows you to write 1 byte of data to the host while it is clocking.
 (achieved in software with some speedy toggling from output to input, ala i2c)
  
@@ -61,60 +80,227 @@ The host device continually writes a header byte, this presumably serves 2 purpo
  1) sync, i'm still here
  2) opportunity for the client remote to ask for data from the host device
  
+
+**Reading from the device**
+
+When you write to certain registers (e.g. capabilities), the remote device will go into TX mode, where it will start sending data back. 
+
+This is generally done in two transactions, as follows:
+
+ * Write (e.g.) 0x01 to device
+ * Write SYNC NOP
+ * if remote device has TX ready flag set, set BUS AVAILABLE
+ * For 10 bytes + parity: (it follows the same logic as reading the remote's header)
+    * Pulse low
+    * Set to read mode and read value from host
+ 
 ### What do you write?
-So far I have observed commands to:
+Emulating a host device, the headers are as follows
+
  * Request first/next block of text (if the track is long, you can only get it in 7 byte increments). Once you have all of the text, no more is sent and the display command not updated
  * Display of track number in text
  * Request the text display in a loop forever
  * crash the minidisc player (bonus feature?)
    
 This could be quite a useful feaure to control...
-If you are running out of processing time, you can request the text, stop requesting while you process the first block, request the next chunk etc.
+If you are running out of processing time, you can request the text, stop requesting while you process the first block, request the next chunk etc. This is exactly how the real remote works when paging in really long titles.
+
+Remote to host bits (when you are a remote, byte 0)
+
+| Bit  | Purpose               |
+|------|-----------------------|
+| 0    |                       |
+| 1    | Ready for text        |
+| 2    | Display Timer         |
+| 3    |                       |
+| 4    | Request TX from remote to host |
+| 5    |                       |
+| 6    | Keep sending text?    |
+| 7    | Initialized and ready |
+
+
+Host to remote bits (when you are a remote, byte 1)
+
+| Bit  | Purpose               |
+|------|-----------------------|
+| 0    | Data to follow Active Low) |
+| 1    |                       |
+| 2    |                       |
+| 3    |                       |
+| 4    | Bus Available         |
+| 5    |                       |
+| 6    |                       |
+| 7    | Initialized and ready |
+
+
+The remote device has the ability to requst TX of data. The general sequence is as follows:
+ * Remote "Set Request TX"
+ * Host reponds with "Bus Available" and unsets "data to follow"
+ * for each byte: (and parity)
+    * Host sends a Start pulse
+    * Remote writes byte
+ 
 
 ### Communication Protocol
 The procol itself is really simple. All little endian, nothing to twiddle.
 After the header, the protocol is formatted as follows:
 
-[Command Byte][[Data Payload][Parity CRC]
+[Command Byte][Data Payload][Parity CRC]
 
 Some commands have a subcommand, such as text.
 
 ### Commands
 | ID   | Purpose     | Notes                         |
-| -----|-------------|-------------------------------|
+|------|-------------|-------------------------------|
+| 0x01 | Capabilities| Host asks the device about Capabilities |
 | 0x03 | Disp Clear? | Sets display mode             |
 | 0x04 |             |                               |
 | 0x05 | Backlight   |   0x7F = on                   |
 | 0x40 | Volume      |                               |
 | 0x41 | Play Mode   |                               |
+| 0x42 | Rec Mode    |                               |
 | 0x43 | Battery     |                               |
+| 0x46 | EQ          |                               |
+| 0x47 | Alarm       |                               |
 | 0xA0 | Track       |                               |
 | 0xA1 | Play State  |                               |
 | 0xA2 | Display Mode|                               |
 | 0xC8 | Text        |                               |
 
-#### Volume
-current volume: when data[0] == 64, display current volume. Volume = data[2]
+In Joint Text link mode:
 
-volume change: when data[0] <= 30, volume = data [0]
+| ID   | Purpose           | Notes                         |
+|------|-------------------|-------------------------------|
+| 0x18 | Get Register      |   Get a register to write to  |
+| 0xD8 | Set Track Count?  |  Sets the track value 0x11    |
+| 0xD9 | Set Track Break   |  Adds track break             |
+
+#### Device Capabilities
+Each device has a capability set. These describe the remote device, such as number of characters, serial number etc.
+
+When the host sends a capability request, the device is expected to write the result back on the next data cycle
+
+**Here are the known capabilities**
+
+**Bank 1**
+
+| ID   | Purpose     | Notes                                        |
+|------|-------------|----------------------------------------------|
+| 0x00 | Type        | 0xC0 Remote Control                          |
+| 0x01 | Block Id    | Which bank of capabilities are we requesting |
+| 0x02 | Char count  |                                              |
+| 0x03 | charset bank| Id of the bank for this charset. 0 or 1      |
+| 0x04 |             |                                              |
+| 0x05 | Lcd Height  |  in px                                       |
+| 0x06 | Lcd Width   |  in px                                       |
+| 0x07 |             |                                              |
+| 0x08 |             |       |
+| 0x09 |             |                                              |
+
+**Bank 2**
+
+Second character set storage, e.g. kanji
+
+| ID   | Purpose     | Notes                                        |
+|------|-------------|----------------------------------------------|
+| 0x00 | Type        | 0xC0 Remote Control                          |
+| 0x01 | Block Id    | Which bank of capabilities are we requesting |
+| 0x02 | Char count  |                                              |
+| 0x03 |             |                                              |
+| 0x04 |             |                                              |
+| 0x05 | lcd rows    |                                              |
+| 0x06 | Protocol V  | Protocol version ID                          |
+| 0x07 |             |                                              |
+| 0x08 |             |                                              |
+| 0x09 |             |                                              |
+
+**Bank 3-4**
+
+Blank
+
+**Bank 5**
+
+Device Serial Number as ASCII. i.e.  "RM-R55G", "RMC AE", "RMC01B", "RMC02D"
+
+**Bank 6**
+
+Device Type
+
+4 bytes of text
+
+ * "COM " (MZ-N1, N707, N505, R910, R909, R900, R700, E909, E707, E606W, E505)
+ * "MD  " (MZ-R55, 70, 90, 91 devices)
+
+#### Volume
+| ID   | Purpose     | Notes                         |
+|------|-------------|-------------------------------|
+| 0x00 | Volume Level| when < 32 this is the volume  |
+| 0x01 | ?           | ?                             |
+| 0x02 | Volume Level| Volume level when 0x00 = 0x40 |
+
+Voume is contained in byte 0. When byte 0 = 0x40, then display existing volume in byte 2
+
 
 #### Track
 4 bit encoded. Low bits are units, high bits tens
 
+| ID   | Purpose     | Notes                         |
+|------|-------------|-------------------------------|
+| 0x03 | Track       | hundreds                      |
+| 0x04 | Track       | ones and tens 4 bits each     |
+
+
 #### Play Mode
 see .h file for more, but contains shuffle, repeat, 1, etc modes
 
+#### Battery
+| ID   | Purpose     | Notes                         |
+|------|-------------|-------------------------------|
+| 0x01 | Battery     | Bit register                  |
+
+Bits
+
+| Bit  | Purpose           |
+|------|-------------------|
+| 0x00 | Blink Low Batt    |
+| 0x01 | Power Connected   |
+| 0x02 | Charging          |
+| 0x03 |                   |
+| 0x04 |                   |
+| 0x05 | Battery Bar bit 0 |
+| 0x06 | Battery Bar bit 1 |
+| 0x07 | Powered by batt   |
+
+battery bar count is in bit 5 and 6
+
+i.e. bars = 0x7F & (val >> 5)
+
 #### Text
-Subcommand: data[1]
-
-Text Start: data[3]
-
-Sent in chunks of 7 characters
+| ID   | Purpose     | Notes                         |
+|------|-------------|-------------------------------|
+| 0x01 | Sub Cmd     | 0x01, text done. 0x02, more text  |
+| 0x02 |             |  0x01, 0x02, 0x80 observed in ROM   |
+| 0x03 | Text        |   Text Payload -  7 chars     |
 
 Subcommand 
+
 * = 2 means more text coming
 * = 1 means last chuck of text
 
+0x02 Type
+* = 0x01 Host sender mode (when in joint text sync
+* = 0x02 seem in firmware, not sure
+* = 0x80
+
+If the text starts with:
+
+| ID   | Purpose     | Notes                         |
+|------|-------------|-------------------------------|
+| 0x20 | Space       | It is usually a time code ** (unless you start a track with a space) |
+| 0x04 | Title Icon  |  Title to follow              |
+| 0x14 | Track Icon  |  Track to follow              |
+
+Text should be sent when the TEXT READY flag is set on the receiving end
 
 #### Parity
 The usual running XOR affair. Nothing special here. Move along.
@@ -128,6 +314,12 @@ There are three parts to this arduino sketch
 The library can be used with or without sending or receiving. Typically I would imagine you will only one to do one of the two functions at a time.
 
 In pure send more, you can manually set values, i.e. "md_set_track(50);" and then immediately send them to the display using "md_send_track();"
+```
+ You need to send in a reasonably defined way.
+ some_lcd_commands();
+ md_loop();
+```
+calling md_loop is important to ensure we are sending sync packets as well as reading any updates from the device
 
 ### Notes:
 * The library blocks as it polls or sends. This might not leave you much processing time.
@@ -138,9 +330,6 @@ In pure send more, you can manually set values, i.e. "md_set_track(50);" and the
  
 ## TODO
  * Track needs hundreds adding
- * more understanding about the tri-state read/write mode
- * add remaining send routines
- * add remaining recv routines?
  * Finish prototype code to press buttons on the MD player using analogWrite
  * I suppose I should add the read compliment to the above
  
@@ -165,3 +354,6 @@ Way too late into this project I found this repo:
  While totally awesome, some information here superceeds it (although not as amazingly documented as Matthew did)
  * Ringtons Coffee. Damn good stuff and get me through the weekend of research.
  * Big credits to the oscope for leading me to the conclusion this was a bidirectional protocol. A few resistors hanging off the board really highlighted that open drain slope like a digital circuit could (and did) not.
+ * Breaking news: Credit to https://minidisc.wiki and the discord community ho have been working on this for a while
+ * Asivery for a similar implementation https://github.com/asivery/Sony-Inline-Remote-Emulator
+ * Ryan "Izzy" Bales for the traces of other remotes that helped clarity a few points. https://raw.githubusercontent.com/izzy84075/md_sigrok_decoders
